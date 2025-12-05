@@ -1,13 +1,11 @@
-compile = gcc
-objflags = -g -Wall -Wextra  -c
-linkflags = -g -Wall -Wextra 
+#  Shaun Cooper
+#  Simple makefile for CUDE
+#
+#   The executable and include paths may be different in the future
+#   If they are , email cs-cog@nmsu.edu
 
-all: count3
-	$(compile) -fopenmp count3.o -o program -pthread
+counts: count3.cu
+	/usr/local/cuda/bin/nvcc -o counts -I/usr/local/cuda/include count3.cu
 
-
-count3: count3.c
-	$(compile)  -fopenmp  $(objflags) count3.c
-
-clean:
-	rm -f *.o *~ count3
+racecondition: racecondition.cu
+	/usr/local/cuda/bin/nvcc -o racecondition -I/usr/local/cuda/include racecondition.cu
