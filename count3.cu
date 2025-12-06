@@ -153,6 +153,21 @@ config_t *parse_args(int argc, char *argv[]){
     return config;
 };
 
+// this one is the cuda kernel to count the number of times a value appears in an array
+// this is more general than the book's version which only counts 3s 
+// we use a singel block for comparison with the cpu version
+// each thread will check one element of the array
+__global__ void count_int_in_range_cuda_singel_block(int *array, int size, int value, int *result){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x; // get the idx of the thread
+    int step = blockDim.x * gridDim.x; // calculate the step size
+    int local_count = 0;
+    for(int i = idx; i < size; i += step){ // loop through the array
+        if(array[i] == value){
+            local_count++; 
+        }
+    }
+    atomicAdd(result, local_count); // add the local count to the global count
+}
 
 __global__ void count_int_in_range_cuda(int *array, int size, int value, int *result){
     int idx = blockIdx.x * blockDim.x + threadIdx.x; // get the idx of the thread
@@ -160,6 +175,31 @@ __global__ void count_int_in_range_cuda(int *array, int size, int value, int *re
     if(array[idx] != value) return;
     atomicAdd(result, 1);
 }
+
+void gpu_count_single_block(config_t *config, int *array, int size, int value, int *result){
+    int *d_array;
+    int *d_result;
+    int h_result = 0;
+    cudaMalloc((void **)&d_array, size * sizeof(int)); // allocate memory on the device
+    cudaMalloc((void **)&d_result, sizeof(int)); // allocate memory for result on the device
+    cudaMemcpy(d_array, array, size * sizeof(int), cudaMemcpyHostToDevice); // copy array to device
+    cudaMemcpy(d_result, &h_result, sizeof(int), cudaMemcpyHostToDevice);   // copy result to device
+
+    int block_size = config->block_size; // get block size from config
+    int num_blocks = 1; // single block
+
+    count_int_in_range_cuda_singel_block<<<num_blocks, block_size>>>(d_array, size, value, d_result);
+
+    cudaMemcpy(&h_result, d_result, sizeof(int), cudaMemcpyDeviceToHost);
+    *result = h_result;
+
+    cudaFree(d_array);
+    cudaFree(d_result);
+
+};
+
+
+
 // this wrapper function for the cuda kernel
 // will be called in the main function when we want to use cuda
 // this is to deal with cuda specific memory management
@@ -250,7 +290,10 @@ void make_data(config_t *config){
     fprintf(Serial_data,"size of n,number of threads,time in ns\n");
 
     FILE *cuda_data = fopen("cuda_data.csv","w");
-    fprintf(Serial_data,"size of n,number of threads,time in ns\n");
+    fprintf(cuda_data,"size of n,number of threads,time in ns\n");
+
+    FILE *cuda_data_1b = fopen("cuda_data_1b.csv","w");
+    fprintf(cuda_data_1b,"size of n,number of threads,time in ns\n");
 
     FILE *thread_data_16 = fopen("thread_data16.csv","w");
     fprintf(thread_data_16,"size of n,number of threads,time in ns\n");
@@ -276,8 +319,13 @@ void make_data(config_t *config){
                   config->block_size=thread;
                   MAKE_TIME_MEASUREMENT(gpu_count( config, random_numbers, arrsize[i], 3, &res_gpu);)
                   fprintf(cuda_data,"%d,%d,%lld\n",arrsize[i],thread,time_taken);
-                   if(res1 != Global_count || res1 != res_gpu){
-                       printf("Error: results do not match! Serial: %d, Threaded: %d, GPU: %d\n", res1, Global_count, res_gpu);
+
+                    int res_gpu_1b = 0;
+                     fflush(cuda_data_1b);
+                  MAKE_TIME_MEASUREMENT(gpu_count_single_block( config, random_numbers, arrsize[i], 3, &res_gpu_1b);)
+                  fprintf(cuda_data_1b,"%d,%d,%lld\n",arrsize[i],thread,time_taken);
+                   if(res1 != Global_count || res1 != res_gpu || res1 != res_gpu_1b){
+                       printf("Error: results do not match! Serial: %d, Threaded: %d, GPU: %d , GPU 1b: %d\n", res1, Global_count, res_gpu, res_gpu_1b);
                    }
                    printf("Completed:\tthreads=%d\tn=%d\ttrial=%d\n",thread,arrsize[i],r);
             }
